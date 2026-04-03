@@ -102,7 +102,7 @@ class CdpClient {
   // ── WebSocket Connection ────────────────────────────────────────────────
 
   connect() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return Promise.resolve();
     if (this.connectPromise) return this.connectPromise;
 
     this.connectPromise = (async () => {
@@ -582,6 +582,7 @@ route('GET', '/screenshot', async (req, res) => {
 
   const filename = `shot-${Date.now()}.png`;
   const filepath = path.join(SCREENSHOT_DIR, filename);
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
   fs.writeFileSync(filepath, Buffer.from(result.data, 'base64'));
 
   ok(res, { path: filepath });
