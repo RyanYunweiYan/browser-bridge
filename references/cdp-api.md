@@ -82,14 +82,14 @@ Create a new background tab and navigate to a URL. Automatically waits for page 
 | Field     | Value                      |
 |-----------|----------------------------|
 | Method    | `GET`                      |
-| Params    | `url` (required) — the URL to open |
+| Params    | `url` (optional, defaults to `about:blank`) — the URL to open |
 
 ```bash
 curl "http://127.0.0.1:9400/new?url=https://example.com"
 ```
 
 ```json
-{"ok": true, "target": "GHI789", "title": "Example Domain", "url": "https://example.com/"}
+{"ok": true, "targetId": "GHI789", "url": "https://example.com/"}
 ```
 
 ---
@@ -108,7 +108,7 @@ curl "http://127.0.0.1:9400/close?target=GHI789"
 ```
 
 ```json
-{"ok": true}
+{"ok": true, "closed": "GHI789"}
 ```
 
 ---
@@ -127,7 +127,7 @@ curl "http://127.0.0.1:9400/navigate?target=ABC123&url=https://github.com/trendi
 ```
 
 ```json
-{"ok": true, "url": "https://github.com/trending", "title": "Trending repositories on GitHub"}
+{"ok": true, "url": "https://github.com/trending"}
 ```
 
 ---
@@ -195,7 +195,7 @@ curl -X POST "http://127.0.0.1:9400/click?target=ABC123" \
 ```
 
 ```json
-{"ok": true}
+{"ok": true, "found": true, "tag": "button", "text": "Submit"}
 ```
 
 ---
@@ -217,7 +217,7 @@ curl -X POST "http://127.0.0.1:9400/type?target=ABC123" \
 ```
 
 ```json
-{"ok": true}
+{"ok": true, "typed": "CDP automation", "selector": "input[name=q]"}
 ```
 
 ---
@@ -240,7 +240,7 @@ curl -X POST "http://127.0.0.1:9400/press?target=ABC123" \
 ```
 
 ```json
-{"ok": true}
+{"ok": true, "pressed": "Enter"}
 ```
 
 ---
@@ -259,7 +259,7 @@ curl "http://127.0.0.1:9400/screenshot?target=ABC123"
 ```
 
 ```json
-{"ok": true, "file": "/tmp/cdp-shots/ABC123-1717200000000.png"}
+{"ok": true, "path": "/tmp/cdp-shots/shot-1717200000000.png"}
 ```
 
 ---
@@ -271,7 +271,7 @@ Scroll the page in a given direction. Waits 600ms after scrolling for lazy-loade
 | Field     | Value                                                    |
 |-----------|----------------------------------------------------------|
 | Method    | `GET`                                                    |
-| Params    | `target` (required), `direction` (required), `y` (optional) |
+| Params    | `target` (required), `direction` (optional, default `down`), `y` (optional, default `800`) |
 
 **Direction values:** `up`, `down`, `top`, `bottom`
 
@@ -286,7 +286,7 @@ curl "http://127.0.0.1:9400/scroll?target=ABC123&direction=top"
 ```
 
 ```json
-{"ok": true}
+{"ok": true, "direction": "down", "pixels": 500}
 ```
 
 ---
@@ -353,7 +353,7 @@ Open a search engine, type a query, press Enter, then extract links from the res
 
 ```bash
 # 1. Open Google
-TARGET=$(curl -s "http://127.0.0.1:9400/new?url=https://www.google.com" | jq -r .target)
+TARGET=$(curl -s "http://127.0.0.1:9400/new?url=https://www.google.com" | jq -r .targetId)
 
 # 2. Type search query
 curl -s -X POST "http://127.0.0.1:9400/type?target=$TARGET" \

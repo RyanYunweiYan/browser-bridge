@@ -219,6 +219,11 @@ class CdpClient {
       }, CMD_TIMEOUT);
 
       this.pending.set(id, { resolve, reject, timer });
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        return reject(new Error('WebSocket not connected'));
+      }
       this.ws.send(JSON.stringify(msg));
     });
   }
