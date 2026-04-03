@@ -243,6 +243,7 @@ class CdpClient {
         targetId,
         flatten: true,
       });
+      if (!sessionId) throw new Error(`attachToTarget returned no sessionId for ${targetId}`);
       this.sessions.set(targetId, sessionId);
       await this.enablePortGuard(sessionId);
       return sessionId;
@@ -395,8 +396,10 @@ route('GET', '/close', async (req, res) => {
   const target = params.get('target');
   if (!target) return fail(res, 'target parameter required');
 
+  const sessionId = cdp.sessions.get(target);
   await cdp.send('Target.closeTarget', { targetId: target });
   cdp.sessions.delete(target);
+  if (sessionId) cdp.guardedSessions.delete(sessionId);
   ok(res, { closed: target });
 });
 
@@ -436,6 +439,9 @@ route('GET', '/info', async (req, res) => {
     returnByValue: true,
   }, sessionId);
 
+  if (result.exceptionDetails) {
+    return fail(res, result.exceptionDetails.exception?.description || result.exceptionDetails.text || 'failed to get page info');
+  }
   const info = JSON.parse(result.result?.value || '{}');
   ok(res, info);
 });

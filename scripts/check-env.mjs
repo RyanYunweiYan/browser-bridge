@@ -69,7 +69,7 @@ async function main() {
   try {
     const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/targets`, { signal: AbortSignal.timeout(2000) });
     const data = await resp.json();
-    if (data.ok) {
+    if (data.ok && Array.isArray(data.targets)) {
       console.log(`proxy: ready (${data.targets.length} tabs visible)`);
       return;
     }

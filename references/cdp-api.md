@@ -43,7 +43,7 @@ curl http://127.0.0.1:9400/health
 ```
 
 ```json
-{"ok": true, "connected": true}
+{"ok": true, "connected": true, "chromePort": 9222}
 ```
 
 If Chrome is not connected, `connected` will be `false` but the response is still `ok: true` (the proxy itself is healthy).
