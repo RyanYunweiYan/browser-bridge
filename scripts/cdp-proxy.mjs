@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { checkProxyPeerRequest, checkProxyRequest, createChallengeProof, proveRunningProxy, loadAuthToken, privateRuntimeDirectory } from './proxy-auth.mjs';
 
 const PROXY_PORT = parseInt(process.env.CDP_PROXY_PORT || '9400', 10);
-const AUTH_TOKEN = loadAuthToken({ create: true });
+const PROXY_CREDENTIAL = loadAuthToken({ create: true });
 const SCREENSHOT_DIR = privateRuntimeDirectory();
 const CMD_TIMEOUT = 30_000;
 const LOAD_TIMEOUT = 15_000;
@@ -661,10 +661,10 @@ const server = http.createServer(async (req, res) => {
     if (typeof challenge !== 'string' || !/^[a-f0-9]{64}$/.test(challenge)) {
       return fail(res, 'Invalid challenge');
     }
-    return ok(res, { proof: createChallengeProof(AUTH_TOKEN, PROXY_PORT, challenge) });
+    return ok(res, { proof: createChallengeProof(PROXY_CREDENTIAL, PROXY_PORT, challenge) });
   }
 
-  const authError = checkProxyRequest(req, PROXY_PORT, AUTH_TOKEN);
+  const authError = checkProxyRequest(req, PROXY_PORT, PROXY_CREDENTIAL);
   if (authError) return fail(res, authError.error, authError.status);
 
   const url = new URL(req.url, 'http://localhost');
@@ -685,7 +685,7 @@ const server = http.createServer(async (req, res) => {
 async function main() {
   // Never send the token to a process that merely occupies this port.
   if (await cdp.probePort(PROXY_PORT)) {
-    if (await proveRunningProxy(PROXY_PORT, AUTH_TOKEN)) {
+    if (await proveRunningProxy(PROXY_PORT, PROXY_CREDENTIAL)) {
       console.error(`CDP Proxy already running on port ${PROXY_PORT}`);
     } else {
       console.error(`Port ${PROXY_PORT} is occupied by an unverified service; inspect it before retrying`);

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { proveRunningProxy, loadAuthToken, openPrivateLog } from './proxy-auth.mjs';
 
 const PROXY_PORT = parseInt(process.env.CDP_PROXY_PORT || '9400');
-const AUTH_TOKEN = loadAuthToken({ create: true });
+const PROXY_CREDENTIAL = loadAuthToken({ create: true });
 const PROXY_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cdp-proxy.mjs');
 
 const major = parseInt(process.versions.node.split('.')[0]);
@@ -64,11 +64,11 @@ async function findChromePort() {
 
 async function proxyState() {
   if (!await probePort(PROXY_PORT)) return { kind: 'absent' };
-  if (!await proveRunningProxy(PROXY_PORT, AUTH_TOKEN)) return { kind: 'unverified' };
+  if (!await proveRunningProxy(PROXY_PORT, PROXY_CREDENTIAL)) return { kind: 'unverified' };
 
   try {
     const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/targets`, {
-      headers: { 'X-CDP-Proxy-Token': AUTH_TOKEN },
+      headers: { 'X-CDP-Proxy-Token': PROXY_CREDENTIAL },
       redirect: 'error',
       signal: AbortSignal.timeout(2000),
     });
