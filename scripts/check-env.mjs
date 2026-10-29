@@ -82,17 +82,13 @@ async function proxyState() {
   }
 }
 
-function stopIfExistingProxyFailed(state) {
+function stopIfUnexpectedProxy(state) {
   if (state.kind === 'unverified') {
     console.error('proxy: port is occupied by an unverified service; inspect it before retrying');
     process.exit(1);
   }
   if (state.kind === 'incompatible') {
     console.error('proxy: an existing server does not require this token; stop it before using this candidate');
-    process.exit(1);
-  }
-  if (state.kind === 'error') {
-    console.error('proxy: an existing authenticated server rejected the request or failed');
     process.exit(1);
   }
 }
@@ -108,33 +104,37 @@ async function main() {
   console.log(`chrome: ok (port ${chromePort})`);
 
   const existing = await proxyState();
-  stopIfExistingProxyFailed(existing);
+  stopIfUnexpectedProxy(existing);
   if (existing.kind === 'ready') {
     console.log(`proxy: ready (${existing.count} tabs visible)`);
     return;
   }
 
-  console.log('proxy: starting...');
-  const { filename: logFile, fd: logFd } = openPrivateLog();
-  const child = spawn(process.execPath, [PROXY_SCRIPT], {
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-  });
-  child.unref();
-  fs.closeSync(logFd);
+  if (existing.kind === 'absent') {
+    console.log('proxy: starting...');
+    const { fd: logFd } = openPrivateLog();
+    const child = spawn(process.execPath, [PROXY_SCRIPT], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    });
+    child.unref();
+    fs.closeSync(logFd);
+  } else {
+    console.log('proxy: authenticated; waiting for Chrome connection...');
+  }
+  console.log('  If Chrome shows its remote-debugging permission dialog, confirm the expected application.');
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
     const state = await proxyState();
-    stopIfExistingProxyFailed(state);
+    stopIfUnexpectedProxy(state);
     if (state.kind === 'ready') {
       console.log(`proxy: ready (${state.count} tabs visible)`);
       return;
     }
-    if (i === 0) console.log('  If Chrome shows a permission dialog, click Allow...');
   }
 
-  console.log(`proxy: timeout. Check log: ${logFile}`);
+  console.error('proxy: Chrome connection did not become ready. Check its remote-debugging permission, then rerun this command.');
   process.exit(1);
 }
 
