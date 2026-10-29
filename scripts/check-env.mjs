@@ -5,8 +5,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { proveRunningProxy, loadAuthToken, openPrivateLog } from './proxy-auth.mjs';
 
 const PROXY_PORT = parseInt(process.env.CDP_PROXY_PORT || '9400');
+const AUTH_TOKEN = loadAuthToken({ create: true });
 const PROXY_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cdp-proxy.mjs');
 
 const major = parseInt(process.versions.node.split('.')[0]);
@@ -22,6 +24,10 @@ function probePort(port) {
 }
 
 async function findChromePort() {
+  if (process.env.CDP_CHROME_PORT) {
+    const port = Number(process.env.CDP_CHROME_PORT);
+    return Number.isInteger(port) && port > 0 && port < 65536 && await probePort(port) ? port : null;
+  }
   const home = os.homedir();
   const paths = [];
   const plat = os.platform();
@@ -56,6 +62,41 @@ async function findChromePort() {
   return null;
 }
 
+async function proxyState() {
+  if (!await probePort(PROXY_PORT)) return { kind: 'absent' };
+  if (!await proveRunningProxy(PROXY_PORT, AUTH_TOKEN)) return { kind: 'unverified' };
+
+  try {
+    const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/targets`, {
+      headers: { 'X-CDP-Proxy-Token': AUTH_TOKEN },
+      redirect: 'error',
+      signal: AbortSignal.timeout(2000),
+    });
+    if (resp.headers.get('x-cdp-proxy-auth') !== 'required') return { kind: 'incompatible' };
+    if (!resp.ok) return { kind: 'error' };
+    const data = await resp.json();
+    if (data.ok && Array.isArray(data.targets)) return { kind: 'ready', count: data.targets.length };
+    return { kind: 'error' };
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+function stopIfExistingProxyFailed(state) {
+  if (state.kind === 'unverified') {
+    console.error('proxy: port is occupied by an unverified service; inspect it before retrying');
+    process.exit(1);
+  }
+  if (state.kind === 'incompatible') {
+    console.error('proxy: an existing server does not require this token; stop it before using this candidate');
+    process.exit(1);
+  }
+  if (state.kind === 'error') {
+    console.error('proxy: an existing authenticated server rejected the request or failed');
+    process.exit(1);
+  }
+}
+
 async function main() {
   const chromePort = await findChromePort();
   if (!chromePort) {
@@ -66,18 +107,15 @@ async function main() {
   }
   console.log(`chrome: ok (port ${chromePort})`);
 
-  try {
-    const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/targets`, { signal: AbortSignal.timeout(2000) });
-    const data = await resp.json();
-    if (data.ok && Array.isArray(data.targets)) {
-      console.log(`proxy: ready (${data.targets.length} tabs visible)`);
-      return;
-    }
-  } catch {}
+  const existing = await proxyState();
+  stopIfExistingProxyFailed(existing);
+  if (existing.kind === 'ready') {
+    console.log(`proxy: ready (${existing.count} tabs visible)`);
+    return;
+  }
 
   console.log('proxy: starting...');
-  const logFile = path.join(os.tmpdir(), 'cdp-proxy.log');
-  const logFd = fs.openSync(logFile, 'a');
+  const { filename: logFile, fd: logFd } = openPrivateLog();
   const child = spawn(process.execPath, [PROXY_SCRIPT], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
@@ -87,14 +125,12 @@ async function main() {
 
   for (let i = 0; i < 15; i++) {
     await new Promise(r => setTimeout(r, 1000));
-    try {
-      const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/targets`, { signal: AbortSignal.timeout(2000) });
-      const data = await resp.json();
-      if (data.ok) {
-        console.log(`proxy: ready (${data.targets.length} tabs visible)`);
-        return;
-      }
-    } catch {}
+    const state = await proxyState();
+    stopIfExistingProxyFailed(state);
+    if (state.kind === 'ready') {
+      console.log(`proxy: ready (${state.count} tabs visible)`);
+      return;
+    }
     if (i === 0) console.log('  If Chrome shows a permission dialog, click Allow...');
   }
 

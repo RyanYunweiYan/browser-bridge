@@ -95,6 +95,8 @@ node ~/.claude/skills/browser-bridge/scripts/match-site.mjs "domain"
 
 Always close tabs you created. Never close user's existing tabs.
 
+The proxy manages its local credential automatically. Run `scripts/check-env.mjs`, then use `scripts/proxy-client.mjs` for every endpoint call; the helper verifies the proxy identity before sending authentication. Do not read or print the credential, use raw unauthenticated curl calls, or kill an unknown process that occupies the port. Read `references/cdp-api.md` before operating the proxy; it explains protected runtime storage, client commands, compatibility and rollback.
+
 ## CDP Proxy API
 
 Base: `http://127.0.0.1:9400` — All responses: `{"ok":true,...}` or `{"ok":false,"error":"..."}`
@@ -111,7 +113,7 @@ Base: `http://127.0.0.1:9400` — All responses: `{"ok":true,...}` or `{"ok":fal
 | /click | POST | CSS selector | Click element |
 | /type | POST | {"selector","text"} | Type into element |
 | /press | POST | Key name | Press key (Enter, Tab...) |
-| /screenshot | GET | ?target= | Capture to /tmp/cdp-shots/ |
+| /screenshot | GET | ?target= | Capture to ~/.cache/browser-bridge/ |
 | /scroll | GET | ?target=&direction= | Scroll (up/down/top/bottom) |
 
 For detailed API docs, JS extraction patterns, and multi-step recipes:

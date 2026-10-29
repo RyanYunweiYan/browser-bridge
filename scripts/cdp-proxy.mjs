@@ -7,9 +7,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { homedir } from 'node:os';
+import { checkProxyPeerRequest, checkProxyRequest, createChallengeProof, proveRunningProxy, loadAuthToken, privateRuntimeDirectory } from './proxy-auth.mjs';
 
 const PROXY_PORT = parseInt(process.env.CDP_PROXY_PORT || '9400', 10);
-const SCREENSHOT_DIR = '/tmp/cdp-shots';
+const AUTH_TOKEN = loadAuthToken({ create: true });
+const SCREENSHOT_DIR = privateRuntimeDirectory();
 const CMD_TIMEOUT = 30_000;
 const LOAD_TIMEOUT = 15_000;
 
@@ -32,6 +34,15 @@ class CdpClient {
   // ── Port Discovery ──────────────────────────────────────────────────────
 
   async discoverPort() {
+    if (process.env.CDP_CHROME_PORT) {
+      const port = Number(process.env.CDP_CHROME_PORT);
+      if (!Number.isInteger(port) || port < 1 || port > 65535 || !await this.probePort(port)) {
+        throw new Error('Configured Chrome port is unavailable');
+      }
+      this.chromePort = port;
+      this.chromeWsPath = await this.fetchWsPath(port);
+      return;
+    }
     const home = homedir();
     const platform = process.platform;
 
@@ -75,7 +86,7 @@ class CdpClient {
     for (const port of [9222, 9229, 9333]) {
       if (await this.probePort(port)) {
         this.chromePort = port;
-        this.chromeWsPath = null;
+        this.chromeWsPath = await this.fetchWsPath(port);
         return;
       }
     }
@@ -97,6 +108,15 @@ class CdpClient {
       sock.once('timeout', () => { sock.destroy(); resolve(false); });
       sock.connect(port, '127.0.0.1');
     });
+  }
+
+  async fetchWsPath(port) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000), redirect: 'error' });
+      const data = await resp.json();
+      const route = new URL(data.webSocketDebuggerUrl).pathname;
+      return route.startsWith('/devtools/browser/') ? route : null;
+    } catch { return null; }
   }
 
   // ── WebSocket Connection ────────────────────────────────────────────────
@@ -337,6 +357,7 @@ function json(res, data, status = 200) {
   const body = JSON.stringify(data);
   res.writeHead(status, {
     'Content-Type': 'application/json',
+    'X-CDP-Proxy-Auth': 'required',
     'Content-Length': Buffer.byteLength(body),
   });
   res.end(body);
@@ -591,10 +612,10 @@ route('GET', '/screenshot', async (req, res) => {
   const sessionId = await cdp.ensureSession(target);
   const result = await cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId);
 
-  const filename = `shot-${Date.now()}.png`;
+  const filename = `shot-${Date.now()}-${process.hrtime.bigint()}.png`;
   const filepath = path.join(SCREENSHOT_DIR, filename);
-  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-  fs.writeFileSync(filepath, Buffer.from(result.data, 'base64'));
+  privateRuntimeDirectory();
+  fs.writeFileSync(filepath, Buffer.from(result.data, 'base64'), { mode: 0o600, flag: 'wx' });
 
   ok(res, { path: filepath });
 });
@@ -633,6 +654,19 @@ route('GET', '/scroll', async (req, res) => {
 // ─── Server ─────────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/auth-challenge') {
+    const peerError = checkProxyPeerRequest(req, PROXY_PORT);
+    if (peerError) return fail(res, peerError.error, peerError.status);
+    const challenge = req.headers['x-cdp-proxy-challenge'];
+    if (typeof challenge !== 'string' || !/^[a-f0-9]{64}$/.test(challenge)) {
+      return fail(res, 'Invalid challenge');
+    }
+    return ok(res, { proof: createChallengeProof(AUTH_TOKEN, PROXY_PORT, challenge) });
+  }
+
+  const authError = checkProxyRequest(req, PROXY_PORT, AUTH_TOKEN);
+  if (authError) return fail(res, authError.error, authError.status);
+
   const url = new URL(req.url, 'http://localhost');
   const key = `${req.method} ${url.pathname}`;
 
@@ -649,14 +683,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function main() {
-  // Check for existing instance
-  try {
-    const resp = await fetch(`http://127.0.0.1:${PROXY_PORT}/health`);
-    if (resp.ok) {
+  // Never send the token to a process that merely occupies this port.
+  if (await cdp.probePort(PROXY_PORT)) {
+    if (await proveRunningProxy(PROXY_PORT, AUTH_TOKEN)) {
       console.error(`CDP Proxy already running on port ${PROXY_PORT}`);
-      process.exit(1);
+    } else {
+      console.error(`Port ${PROXY_PORT} is occupied by an unverified service; inspect it before retrying`);
     }
-  } catch { /* not running, good */ }
+    process.exit(1);
+  }
 
   // Ensure screenshot directory
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -675,6 +710,11 @@ async function main() {
     console.warn('Will retry on first request.');
   }
 }
+
+server.on('error', (err) => {
+  console.error(`CDP Proxy listen failed: ${err.code || 'error'}`);
+  process.exit(1);
+});
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
 

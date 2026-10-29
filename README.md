@@ -19,7 +19,7 @@ When `WebSearch` and `WebFetch` aren't enough — login-required sites, JS-rende
 Claude Code  ──(HTTP)──►  CDP Proxy (127.0.0.1:9400)  ──(WebSocket)──►  Your Chrome
 ```
 
-A Node.js proxy translates 12 ergonomic HTTP endpoints into Chrome DevTools Protocol commands. The agent calls the proxy via `curl`; the proxy drives your already-running Chrome instance.
+A Node.js proxy translates 12 ergonomic HTTP endpoints into Chrome DevTools Protocol commands. The agent calls the proxy via the authenticated `proxy-client.mjs` helper; the proxy drives your already-running Chrome instance.
 
 ## Setup
 
@@ -53,6 +53,13 @@ The skill auto-activates when you mention browsing, scraping, or specific platfo
 | `/eval` | Execute JS in page context |
 | `/click`, `/type`, `/press` | UI interaction |
 | `/scroll`, `/screenshot` | Inspection |
+
+Run `scripts/check-env.mjs` to start the protected proxy. It creates one random credential in the current user's private runtime directory `~/.cache/browser-bridge/` (directory mode 0700, file mode 0600). This directory is outside the Skill and must not enter backups. The proxy and `scripts/proxy-client.mjs` read it internally; never read, print, copy, or ask the user to paste its value. A malformed, symlinked, or non-private credential file causes a safe stop. `CDP_PROXY_STATE_DIR` can select an isolated runtime directory for testing. An explicitly provided `CDP_PROXY_AUTH_TOKEN` is supported for managed environments, but must not be logged.
+
+Use `proxy-client.mjs` for all browser-control and status calls. It verifies the process on the port using a random `/auth-challenge` before sending the credential in `X-CDP-Proxy-Token`; it refuses redirects and non-local destinations. The server validates the exact `127.0.0.1` Host and rejects any Origin header. Unknown services on the port cause a safe stop; do not kill them automatically. Existing clients without the header receive HTTP 401. Replace their raw curl calls with the helper. Same-user malware and the separate Chrome debugging port are outside this HTTP credential boundary.
+
+To roll back, stop only this proxy and restore the backed-up files; restoring old code also restores its unauthenticated behavior. Do not delete browser data. `CDP_CHROME_PORT` may pin the intended local Chrome debug port, especially for an isolated test browser.
+
 
 Full reference: [`references/cdp-api.md`](references/cdp-api.md).
 

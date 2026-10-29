@@ -27,6 +27,16 @@ The CDP Proxy provides a simplified HTTP interface to Chrome DevTools Protocol, 
 
 ---
 
+## Access control
+
+Run `scripts/check-env.mjs` to start the protected proxy. It creates one random credential in the current user's private runtime directory `~/.cache/browser-bridge/` (directory mode 0700, file mode 0600). This directory is outside the Skill and must not enter backups. The proxy and `scripts/proxy-client.mjs` read it internally; never read, print, copy, or ask the user to paste its value. A malformed, symlinked, or non-private credential file causes a safe stop. `CDP_PROXY_STATE_DIR` can select an isolated runtime directory for testing. An explicitly provided `CDP_PROXY_AUTH_TOKEN` is supported for managed environments, but must not be logged.
+
+Use `proxy-client.mjs` for all browser-control and status calls. It verifies the process on the port using a random `/auth-challenge` before sending the credential in `X-CDP-Proxy-Token`; it refuses redirects and non-local destinations. The server validates the exact `127.0.0.1` Host and rejects any Origin header. Unknown services on the port cause a safe stop; do not kill them automatically. Existing clients without the header receive HTTP 401. Replace their raw curl calls with the helper. Same-user malware and the separate Chrome debugging port are outside this HTTP credential boundary.
+
+To roll back, stop only this proxy and restore the backed-up files; restoring old code also restores its unauthenticated behavior. Do not delete browser data. `CDP_CHROME_PORT` may pin the intended local Chrome debug port, especially for an isolated test browser.
+
+Set `BRIDGE` to the absolute installed Skill directory before running the examples below.
+
 ## 2. Endpoint Reference
 
 ### 2.1 GET /health
@@ -39,7 +49,7 @@ Check proxy status. Does **not** require an active Chrome connection.
 | Params    | None        |
 
 ```bash
-curl http://127.0.0.1:9400/health
+node "$BRIDGE/scripts/proxy-client.mjs" http://127.0.0.1:9400/health
 ```
 
 ```json
@@ -60,7 +70,7 @@ List all open browser tabs.
 | Params    | None        |
 
 ```bash
-curl http://127.0.0.1:9400/targets
+node "$BRIDGE/scripts/proxy-client.mjs" http://127.0.0.1:9400/targets
 ```
 
 ```json
@@ -85,7 +95,7 @@ Create a new background tab and navigate to a URL. Automatically waits for page 
 | Params    | `url` (optional, defaults to `about:blank`) — the URL to open |
 
 ```bash
-curl "http://127.0.0.1:9400/new?url=https://example.com"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/new?url=https://example.com"
 ```
 
 ```json
@@ -104,7 +114,7 @@ Close a tab.
 | Params    | `target` (required) — tab ID     |
 
 ```bash
-curl "http://127.0.0.1:9400/close?target=GHI789"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/close?target=GHI789"
 ```
 
 ```json
@@ -123,7 +133,7 @@ Navigate an existing tab to a new URL. Automatically waits for page load and ret
 | Params    | `target` (required), `url` (required)        |
 
 ```bash
-curl "http://127.0.0.1:9400/navigate?target=ABC123&url=https://github.com/trending"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/navigate?target=ABC123&url=https://github.com/trending"
 ```
 
 ```json
@@ -142,7 +152,7 @@ Get page title, URL, and ready state for a tab.
 | Params    | `target` (required) — tab ID     |
 
 ```bash
-curl "http://127.0.0.1:9400/info?target=ABC123"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/info?target=ABC123"
 ```
 
 ```json
@@ -162,7 +172,7 @@ Execute arbitrary JavaScript in the target tab and return the result.
 | Body      | Plain text JavaScript expression           |
 
 ```bash
-curl -X POST "http://127.0.0.1:9400/eval?target=ABC123" \
+node "$BRIDGE/scripts/proxy-client.mjs" -X POST "http://127.0.0.1:9400/eval?target=ABC123" \
   -d "document.title"
 ```
 
@@ -173,7 +183,7 @@ curl -X POST "http://127.0.0.1:9400/eval?target=ABC123" \
 The body is evaluated as an expression. For complex logic, wrap in an IIFE:
 
 ```bash
-curl -X POST "http://127.0.0.1:9400/eval?target=ABC123" \
+node "$BRIDGE/scripts/proxy-client.mjs" -X POST "http://127.0.0.1:9400/eval?target=ABC123" \
   -d "(()=>{ const links = document.querySelectorAll('a'); return links.length; })()"
 ```
 
@@ -190,7 +200,7 @@ Click a DOM element matching a CSS selector.
 | Body      | Plain text CSS selector                    |
 
 ```bash
-curl -X POST "http://127.0.0.1:9400/click?target=ABC123" \
+node "$BRIDGE/scripts/proxy-client.mjs" -X POST "http://127.0.0.1:9400/click?target=ABC123" \
   -d "button.submit"
 ```
 
@@ -211,7 +221,7 @@ Type text into a DOM element. Uses `Input.insertText` for compatibility with fra
 | Body      | JSON: `{"selector": "...", "text": "..."}`      |
 
 ```bash
-curl -X POST "http://127.0.0.1:9400/type?target=ABC123" \
+node "$BRIDGE/scripts/proxy-client.mjs" -X POST "http://127.0.0.1:9400/type?target=ABC123" \
   -H "Content-Type: application/json" \
   -d '{"selector": "input[name=q]", "text": "CDP automation"}'
 ```
@@ -235,7 +245,7 @@ Press a keyboard key.
 **Supported keys:** `Enter`, `Tab`, `Escape`, `Backspace`, `ArrowDown`, `ArrowUp`, `ArrowLeft`, `ArrowRight`, `Space`
 
 ```bash
-curl -X POST "http://127.0.0.1:9400/press?target=ABC123" \
+node "$BRIDGE/scripts/proxy-client.mjs" -X POST "http://127.0.0.1:9400/press?target=ABC123" \
   -d "Enter"
 ```
 
@@ -247,7 +257,7 @@ curl -X POST "http://127.0.0.1:9400/press?target=ABC123" \
 
 ### 2.11 GET /screenshot
 
-Capture the visible viewport as a PNG image. Saved to `/tmp/cdp-shots/`.
+Capture the visible viewport as a PNG image. Saved to `~/.cache/browser-bridge/`.
 
 | Field     | Value                             |
 |-----------|-----------------------------------|
@@ -255,11 +265,11 @@ Capture the visible viewport as a PNG image. Saved to `/tmp/cdp-shots/`.
 | Params    | `target` (required) — tab ID     |
 
 ```bash
-curl "http://127.0.0.1:9400/screenshot?target=ABC123"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/screenshot?target=ABC123"
 ```
 
 ```json
-{"ok": true, "path": "/tmp/cdp-shots/shot-1717200000000.png"}
+{"ok": true, "path": "~/.cache/browser-bridge/shot-1717200000000.png"}
 ```
 
 ---
@@ -279,10 +289,10 @@ The `y` parameter specifies scroll amount in pixels (used with `up`/`down`).
 
 ```bash
 # Scroll down 500px
-curl "http://127.0.0.1:9400/scroll?target=ABC123&direction=down&y=500"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/scroll?target=ABC123&direction=down&y=500"
 
 # Jump to top
-curl "http://127.0.0.1:9400/scroll?target=ABC123&direction=top"
+node "$BRIDGE/scripts/proxy-client.mjs" "http://127.0.0.1:9400/scroll?target=ABC123&direction=top"
 ```
 
 ```json
@@ -353,21 +363,21 @@ Open a search engine, type a query, press Enter, then extract links from the res
 
 ```bash
 # 1. Open Google
-TARGET=$(curl -s "http://127.0.0.1:9400/new?url=https://www.google.com" | jq -r .targetId)
+TARGET=$(node "$BRIDGE/scripts/proxy-client.mjs" -s "http://127.0.0.1:9400/new?url=https://www.google.com" | jq -r .targetId)
 
 # 2. Type search query
-curl -s -X POST "http://127.0.0.1:9400/type?target=$TARGET" \
+node "$BRIDGE/scripts/proxy-client.mjs" -s -X POST "http://127.0.0.1:9400/type?target=$TARGET" \
   -H "Content-Type: application/json" \
   -d '{"selector": "textarea[name=q]", "text": "browser automation CDP"}'
 
 # 3. Press Enter to submit
-curl -s -X POST "http://127.0.0.1:9400/press?target=$TARGET" -d "Enter"
+node "$BRIDGE/scripts/proxy-client.mjs" -s -X POST "http://127.0.0.1:9400/press?target=$TARGET" -d "Enter"
 
 # 4. Wait for results to load
 sleep 2
 
 # 5. Extract result links
-curl -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
+node "$BRIDGE/scripts/proxy-client.mjs" -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
   -d "Array.from(document.querySelectorAll('h3')).map(h=>({title:h.textContent,href:h.closest('a')?.href}))"
 ```
 
@@ -380,8 +390,8 @@ TARGET="ABC123"
 
 # Collect items after each scroll
 for i in $(seq 1 5); do
-  curl -s "http://127.0.0.1:9400/scroll?target=$TARGET&direction=down&y=800"
-  curl -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
+  node "$BRIDGE/scripts/proxy-client.mjs" -s "http://127.0.0.1:9400/scroll?target=$TARGET&direction=down&y=800"
+  node "$BRIDGE/scripts/proxy-client.mjs" -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
     -d "document.querySelectorAll('.feed-item').length"
 done
 ```
@@ -394,12 +404,12 @@ Check if the user is logged in before navigating to a protected page.
 TARGET="ABC123"
 
 # Check login state
-LOGGED_IN=$(curl -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
+LOGGED_IN=$(node "$BRIDGE/scripts/proxy-client.mjs" -s -X POST "http://127.0.0.1:9400/eval?target=$TARGET" \
   -d "!!document.querySelector('.user-avatar, .profile-link, [data-user], .logout')" \
   | jq -r .value)
 
 if [ "$LOGGED_IN" = "true" ]; then
-  curl -s "http://127.0.0.1:9400/navigate?target=$TARGET&url=https://example.com/dashboard"
+  node "$BRIDGE/scripts/proxy-client.mjs" -s "http://127.0.0.1:9400/navigate?target=$TARGET&url=https://example.com/dashboard"
 else
   echo "Not logged in. Navigate to login page manually."
 fi
@@ -416,8 +426,8 @@ fi
 | `"error": "no such selector"` or click/type fails | The CSS selector doesn't match any element. | Verify the selector with `/eval` first: `document.querySelector('...')`. The page may not be fully loaded. |
 | `/eval` returns `null` or `undefined` | The JS expression evaluated to nothing. | Ensure you return a value. Wrap in an IIFE if using statements. |
 | `/navigate` returns a different URL than requested | The site redirected. | This is expected behavior. The returned `url` is the final destination after all redirects. |
-| `/screenshot` returns error about directory | The `/tmp/cdp-shots/` directory could not be created. | Check filesystem permissions. The proxy attempts to create the directory automatically. |
+| `/screenshot` returns error about directory | The `~/.cache/browser-bridge/` directory could not be created. | Check filesystem permissions. The proxy attempts to create the directory automatically. |
 | `/type` doesn't fill the field | The input field uses a framework (React/Vue) that ignores synthetic key events. | `/type` uses `Input.insertText` which handles most frameworks. If still failing, try `/click` on the field first, then `/type`. |
 | `/scroll` doesn't load new content | The page needs more time for lazy loading, or scroll distance is too small. | Increase the `y` value or call `/scroll` multiple times. The built-in 600ms wait handles most cases. |
-| Proxy itself is unreachable | The proxy process is not running. | Start the proxy server. Verify with `curl http://127.0.0.1:9400/health`. |
+| Proxy itself is unreachable | The proxy process is not running. | Start the proxy server. Verify with `node "$BRIDGE/scripts/proxy-client.mjs" http://127.0.0.1:9400/health`. |
 | WebSocket CLOSING state errors | The connection is in a transitional state. | Wait briefly and retry. The proxy has built-in guards for this state. |
